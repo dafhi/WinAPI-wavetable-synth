@@ -28,7 +28,7 @@
 '/
 
 
-dim as single  tDemoSeconds = 300
+dim as single  tDemoSeconds = 600
 
 print "demo will quit after"; tDemoSeconds; " seconds  (eco friendly)"
 
@@ -867,7 +867,7 @@ end sub
 '' idea + code: DeepSeek
 ''    wave modes:  0 = carrier, 1 = carrier+FM, 2 = carrier+FM+noise
 ''    TAB cycles wave mode
-'' idea: noise detail (dafhi)
+'' idea: noise detail (not implimented) (dafhi)
 '' ============================================================
 
 namespace scopes
