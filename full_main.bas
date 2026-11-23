@@ -643,7 +643,7 @@ end namespace ' -- knobs
 
 namespace my_wavetables
 
-  dim as long     wt_len_tone    = 400
+  dim as long     wt_len_tone    = 40
   dim as long     wt_samp_valmax = 65536 * 3
   
   dim as long     wt_sine(), wt_tri(), wt_saw(), wt_square(), wt_noise()', wt_wave()
