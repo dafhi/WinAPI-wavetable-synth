@@ -1,4 +1,4 @@
-/' -- WinAPI wavetable synth - 2026 Nov 22  by dafhi
+/' -- WinAPI wavetable synth - 2026 Nov 23  by dafhi
 
     - credit -
     
@@ -10,20 +10,30 @@
   inspiration   Hermes    40 %,  Qwen / Gemini 10 %
 
     unique:
-  Tone buffer (sine, square..) lengths are relatively small at 400.
+  Tone buffer (sine, square..) lengths are relatively small at 40.
   You can hear a bit of 'wind' at quieter tones b/c of that smallness.
   
-  You can change the size .. just search for '400'
+  You can change the size .. search '40'
  
-  Sometimes the audio will initialize incorrectly - just restart
+  Sometimes the audio will initialize incorrectly - restart or increase WinAPI buffer
+ 
+  - changes Nov 23 (thanks to bug revealed by scopes.sample_wave)
+  # bugfix: f_idx_tonal(..) -> frac can return neg -> sample index
+  . removal:  modu function
+  . renames
+  .. scopes.wave_buf & lof_buf -> .._im
+  .. f_wavemorph( .., tonal_index) -> samp_index
+  # additional changes
+  . knob curve
+  . buf len 400 -> 40 for charm
 
    ToDo:
    
-  Try to work out a more compelling noise buffer readout
+  Try to work out a more compelling noise readout
   ADSR
   note input
   
-  License:  Modify, profit.
+  license:  modify, profit
 
 '/
 
@@ -291,10 +301,6 @@ end function
 function f_quant( t as double, m as double ) as single
     return m * int( t / m )
 End Function
-
-function modu( t as double, m as double ) as single
-    return t - m * int( t / m )
-End Function
     '
     ' ----- boilerplate.bas
 
@@ -443,8 +449,8 @@ end sub
       sub _microadjust_via_mousedir_change( byref t as tKnob, dy as single )
         dim as long i = sgn(dy) : c_sgn += i
         if i*sgn(c_sgn) < 1 then c_sgn = 0
-        dim as single samedir_curve = (abs(c_sgn) ^ 0.5 / 40) ^ 2.0
-        dim as single knob_DY_curve = (abs(dy) ^ 2.0 / 200) ^ 4.5
+        dim as single samedir_curve = (abs(c_sgn) ^ 0.5 / 16) ^ 2.5
+        dim as single knob_DY_curve = (abs(dy) ^ 2.0 / 300) ^ 2.5   '' 2026 Nov 13
         t._val = clamp( t._val - i * (samedir_curve ^ 2.75 + knob_DY_curve) )
       End Sub
 
@@ -636,7 +642,7 @@ end sub
 end namespace ' -- knobs
 
 namespace my_wavetables
-  
+
   dim as long     wt_len_tone    = 400
   dim as long     wt_samp_valmax = 65536 * 3
   
@@ -646,7 +652,8 @@ namespace my_wavetables
   dim as single   virtual_len_noise
 
   function f_idx_tonal(t as single) as long
-    return (wt_len_tone) * frac(t) - 0.5
+    return (wt_len_tone) * (t - int(t)) - 0.5 '' 2026 Nov 23
+    'return (wt_len_tone) * frac(t) - 0.5
   end function
 
 function wSine(t as single)  as long  : return wt_sine( f_idx_tonal(t) )   : end function
@@ -654,7 +661,8 @@ function wTri(t as single)   as long  : return wt_tri( f_idx_tonal(t) )    : end
 function wSaw(t as single)   as long  : return wt_saw( f_idx_tonal(t) )    : end function
 function wSquare(t as single) as long : return wt_square( f_idx_tonal(t) ) : end function
 
-function wNoise(t as single) as long  : return wt_noise( modu(t, virtual_len_noise) ): end function
+function wNoise(t as single) as long  : return wt_noise( int(t) mod virtual_len_noise ): end function
+'function wNoise(t as single) as long  : return wt_noise( modu(t, virtual_len_noise) ): end function
 
 sub fill_wavetables(u as long = -1)
     if u > -1 then wt_len_tone = u + 1
@@ -677,11 +685,11 @@ sub fill_wavetables(u as long = -1)
     pWave(0) = @wt_sine(0) :  pWave(1) = @wt_tri(0) :  pWave(2) = @wt_saw(0) :  pWave(3) = @wt_square(0)
 end sub
 
-    function f_wavemorph( morph_val as single, tonal_index as long ) as long
+    function f_wavemorph( morph_val as single, samp_index as long ) as long
         morph_val = clamp(morph_val) * (ubound(pwave) - 0.001)
         dim as long k = int(morph_val) '' 0 1 or 2
-        dim as long samp__wtable_A = pwave(k)[tonal_index]
-        dim as long samp__wtable_B = pwave(k+1)[tonal_index]
+        dim as long samp__wtable_A = pwave(k)[samp_index]
+        dim as long samp__wtable_B = pwave(k+1)[samp_index]
         return samp__wtable_A + frac(morph_val) * ( samp__wtable_B - samp__wtable_A )
     End function
   
@@ -881,21 +889,21 @@ namespace scopes
 
   dim as long     _x = 490, _y = 10
   dim as long     _wave_mode = 2
-  dim as any ptr  wave_buf = 0
-  dim as any ptr  lfo_buf  = 0
+  dim as any ptr  wave_im = 0
+  dim as any ptr  lof_im  = 0
 
   dim as string*20 titles(2) => { "Carrier", "FM", "Output" }
   
   sub init(x as long = -1, y as long = -1)
     if x > -1 then _x = x
     if y > -1 then _y = y
-    if wave_buf = 0 then wave_buf = imagecreate(WAVE_W, WAVE_H)
-    if lfo_buf  = 0 then lfo_buf  = imagecreate(LFO_W,  LFO_H)
+    if wave_im = 0 then wave_im = imagecreate(WAVE_W, WAVE_H)
+    if lof_im  = 0 then lof_im  = imagecreate(LFO_W,  LFO_H)
   end sub
 
   sub close_bufs()
-    if wave_buf <> 0 then imagedestroy wave_buf : wave_buf = 0
-    if lfo_buf  <> 0 then imagedestroy lfo_buf  : lfo_buf  = 0
+    if wave_im <> 0 then imagedestroy wave_im : wave_im = 0
+    if lof_im  <> 0 then imagedestroy lof_im  : lof_im  = 0
   end sub
 
   sub next_wave_mode()
@@ -904,9 +912,11 @@ namespace scopes
 
   '' ---- wave reveal ----
   function sample_wave(phase as single) as single
+
     dim as single fm_amt = 0
     dim as single morph  = 0.5
     dim as single q_val  = 8
+    
     if c_notesplaying > 0 then
       dim as notevars ptr nv = @shared_notes(0)
       dim as double ph = nv->mod_phase
@@ -923,6 +933,7 @@ namespace scopes
     end if
 
     dim as long   idx  = f_idx_tonal(phase + fm)
+    'if idx < 0 or idx >= wt_len_tone then ? idx:sleep '' bug: idx was < 0
     dim as long   wave = f_wavemorph(morph, idx)
 
     if _wave_mode < 2 then return wave / wt_samp_valmax
@@ -934,15 +945,15 @@ namespace scopes
   end function
 
   sub draw_wave()
-    if wave_buf = 0 then exit sub
+    if wave_im = 0 then exit sub
     if ScreenPtr = 0 then exit sub
 
-    line wave_buf, (0,0)-(WAVE_W-1, WAVE_H-1), rgb(8,8,12), BF
-    line wave_buf, (2, 20)-(WAVE_W-3, WAVE_H-3), rgb(40,40,52), B
-    line wave_buf, (2, (20 + WAVE_H-3)\2)-(WAVE_W-3, (20 + WAVE_H-3)\2), rgb(30,30,38)
+    line wave_im, (0,0)-(WAVE_W-1, WAVE_H-1), rgb(8,8,12), BF
+    line wave_im, (2, 20)-(WAVE_W-3, WAVE_H-3), rgb(40,40,52), B
+    line wave_im, (2, (20 + WAVE_H-3)\2)-(WAVE_W-3, (20 + WAVE_H-3)\2), rgb(30,30,38)
 
     static as ulong  cols(0 to 2)   = { rgb(120,200,255), rgb(255,180,120), rgb(160,255,160) }
-    draw string wave_buf, (5, 4), titles(_wave_mode), cols(_wave_mode)
+    draw string wave_im, (5, 4), titles(_wave_mode), cols(_wave_mode)
 
     dim as single prev_y = -1
     for px as long = 0 to WAVE_W - 1
@@ -950,12 +961,12 @@ namespace scopes
       dim as single v = sample_wave(phase)
       v = clamp(v * 1.8, 1, -1)
       dim as single y = (20 + (WAVE_H - 3 - 20)\2) - v * ((WAVE_H - 3 - 20) * 0.45)
-      if prev_y >= 0 then line wave_buf, (px, prev_y)-(px + 1, y), cols(_wave_mode)
+      if prev_y >= 0 then line wave_im, (px, prev_y)-(px + 1, y), cols(_wave_mode)
       prev_y = y
     next
 
-    line wave_buf, (0,0)-(WAVE_W-1, WAVE_H-1), rgb(80,80,100), B
-    put (_x, _y), wave_buf, pset
+    line wave_im, (0,0)-(WAVE_W-1, WAVE_H-1), rgb(80,80,100), B
+    put (_x, _y), wave_im, pset
   end sub
 
   '' ---- LFO strip ----
@@ -976,7 +987,7 @@ namespace scopes
       if hs < 0.0001 then hs = 1
       dim as single norm = clamp((v - mi) / hs, 1, -1)
       dim as single y = (cy + ch*0.5) - norm * (ch * 0.45)
-      if prevY >= 0 then line lfo_buf, (cx + i - 1, prevY)-(cx + i, y), col
+      if prevY >= 0 then line lof_im, (cx + i - 1, prevY)-(cx + i, y), col
       prevY = y
     next
 
@@ -988,15 +999,15 @@ namespace scopes
     dim as single hs  = (hi - lo) * 0.5
     if hs < 0.0001 then hs = 1
     dim as single py  = (cy + ch*0.5) - ((v - mi) / hs) * (ch * 0.45)
-    line lfo_buf, (px - 3, py)-(px + 3, py), rgb(255,255,255)
-    line lfo_buf, (px, py - 3)-(px, py + 3), rgb(255,255,255)
+    line lof_im, (px - 3, py)-(px + 3, py), rgb(255,255,255)
+    line lof_im, (px, py - 3)-(px, py + 3), rgb(255,255,255)
   end sub
 
   sub draw_lfo()
-    if lfo_buf = 0 then exit sub
+    if lof_im = 0 then exit sub
     if ScreenPtr = 0 then exit sub
 
-    line lfo_buf, (0,0)-(LFO_W-1, LFO_H-1), rgb(8,8,12), BF
+    line lof_im, (0,0)-(LFO_W-1, LFO_H-1), rgb(8,8,12), BF
 
     dim as double ph = 0
     if c_notesplaying > 0 then ph = shared_notes(0).mod_phase
@@ -1012,15 +1023,15 @@ namespace scopes
     for k as long = 0 to 2
       dim as long cx = PAD + k * (COL_W + PAD)
       dim as long cy = PAD + 20
-      line lfo_buf, (cx, cy)-(cx + COL_W - 1, cy + COL_H - 1), rgb(40,40,52), B
-      line lfo_buf, (cx, cy + COL_H\2)-(cx + COL_W - 1, cy + COL_H\2), rgb(30,30,38)
+      line lof_im, (cx, cy)-(cx + COL_W - 1, cy + COL_H - 1), rgb(40,40,52), B
+      line lof_im, (cx, cy + COL_H\2)-(cx + COL_W - 1, cy + COL_H\2), rgb(30,30,38)
       dim as string ttl = names(k) & "  " & round(*lfos(k)->pRate, 1) & " Hz"
-      draw string lfo_buf, (cx + 2, PAD + 4), ttl, cols(k)
+      draw string lof_im, (cx + 2, PAD + 4), ttl, cols(k)
       trace_lfo *lfos(k), cx + 1, cy + 1, COL_W - 2, COL_H - 2, cols(k), ph
     next
 
-    line lfo_buf, (0,0)-(LFO_W-1, LFO_H-1), rgb(80,80,100), B
-    put (_x, _y + WAVE_H + 5), lfo_buf, pset
+    line lof_im, (0,0)-(LFO_W-1, LFO_H-1), rgb(80,80,100), B
+    put (_x, _y + WAVE_H + 5), lof_im, pset
   end sub
 
   '' ---- public ----
@@ -1095,11 +1106,11 @@ with groups(1)
 end with
 index = 3 : size = 130
 init_knobs myk(), groups(1), index, size, gap_x, gap_y
-kinit  3, 0.5,   2.5
-kinit  4,   0,   2.5
-kinit  5,   2, 5000
+kinit  3,   0.5,   2.5
+kinit  4,   0.0,   2.5
+kinit  5,  40.0,   5000
 myk(6) = myk(5)
-kinit  6,   0.004,   2.5,  "FM Ratio", 0.001, groups(1).x + 3 * (size + gap_x), groups(1).y, 0.0 '' step
+kinit  6,  0.001, 2.5,  "FM Ratio", 0.001, groups(1).x + 3 * (size + gap_x), groups(1).y, 0.0 '' step
 
 set_LFO synth_patch.LFO_FMAmt,   myk(), index, -myk(6).hi '' DeepSeek suggestion
 
@@ -1197,9 +1208,9 @@ do
   end if
   prevMb = mb
   prevMy = my
-scopes.key_poll
-scopes.draw_it
-sleep 8
+  scopes.key_poll
+  scopes.draw_it
+  sleep 8
 loop
 
 knob_images_cleanup
