@@ -1,4 +1,4 @@
-/' -- WinAPI wavetable synth - 2026 Nov 23  by dafhi
+/' -- WinAPI wavetable synth - 2026 Nov 24  by dafhi
 
     - credit -
     
@@ -10,28 +10,21 @@
   inspiration   Hermes    40 %,  Qwen / Gemini 10 %
 
     unique:
-  Tone buffer (sine, square..) lengths are relatively small at 40.
-  You can hear a bit of 'wind' at quieter tones b/c of that smallness.
+  variable size Tone buffers (sine, square..) relatively small at 110.
+  You can hear a bit of 'wind' at quieter tones b/c of that smallness
   
-  You can change the size .. search '40'
- 
   Sometimes the audio will initialize incorrectly - restart or increase WinAPI buffer
  
-  - changes Nov 23 (thanks to bug revealed by scopes.sample_wave)
-  # bugfix: f_idx_tonal(..) -> frac can return neg -> sample index
-  . removal:  modu function
-  . renames
-  .. scopes.wave_buf & lof_buf -> .._im
-  .. f_wavemorph( .., tonal_index) -> samp_index
-  # additional changes
-  . knob curve
-  . buf len 400 -> 40 for charm
+  - changes Nov 24
+  . removed unused f_a256()
+  . tone buf len
+  . FM ratio lbound 0.001 -> 0.000
 
    ToDo:
    
-  Try to work out a more compelling noise readout
   ADSR
   note input
+  Try to work out a more compelling noise readout
   
   license:  modify, profit
 
@@ -227,10 +220,6 @@ end sub
            ((fore and &H00ff00) * _a + (back and &H00ff00) * (256-_a) + &H008000) and &H00ff0000) Shr 8
   end scope
 #EndMacro
-
-Function f_a256(c As ULong) As Long
-    Return ((c Shr 24) / 255) * 257 - 0.5
-End Function
 
 type t_draw_area field = 2
   dim as short x0, y0, x1, y1
@@ -562,7 +551,6 @@ sub knob_bake(byref t as tKnob, r as single = 1)
   aa_dot.render_target imv_knob_complete.im
   
   dim as single cx = knob_cx(t), cy = knob_cy(t)     ' local from macro
-  '?t.label: sleep 200
   draw string imv_knob_complete.im, (cx-0 - len(t.label)*4, 09), t.label, hsv(t.hue, 0.10, 0.1, 255)
   draw string imv_knob_complete.im, (cx-1 - len(t.label)*4, 11), t.label, hsv(t.hue, 0.10, 0.1, 255)
   draw string imv_knob_complete.im, (cx+1 - len(t.label)*4, 10), t.label, hsv(t.hue, 0.10, 0.91, 255)
@@ -617,25 +605,9 @@ sub draw_group_panel(a() as tKnob, byref g as tKnobs)
   dim as long y0 = a(g.first).y - 26
   dim as long y1 = a(g.first).y + a(g.first).size + 8
 
-  #if 0
-  dim as imvars imv_win   '' gradient body
-  fill_imvars imv_win, 0
-  
-  for y as long = max(0, y0) to min(imv_win.hm, y1)
-    dim as ulong ptr p = cast(ulong ptr, imv_win.pixels + y * imv_win.pitch)
-    dim as single f = (y - y0) / (y1 - y0)
-    dim as ulong c
-    Alpha256(c, PANEL_HI, PANEL_LO, 256.499 * f)
-    for x as long = max(0, x0) to min(imv_win.wm, x1) : p[x] = c : next
-  next
-  _gfx_release imv_win.im
-  #endif
-
   line (x0, y0)-(x1, y0 + 20), PANEL_HI, B   ' heading strip
-'  line (x0, y0)-(x1, y1), KNOB_RIM, B          ' outline
   line (x0, y0+20)-(x1, y1), PANEL_HI, B
   dim as long tx = x0 + (x1 - x0) / 2 - len(g.group_label) * 4
-'  ? tx, y0
   draw string (tx, y0 + 7), g.group_label, hsv(g.hue, 0.30, 0.85, 255)
 end sub
 
@@ -643,7 +615,7 @@ end namespace ' -- knobs
 
 namespace my_wavetables
 
-  dim as long     wt_len_tone    = 40
+  dim as long     wt_len_tone    = 110
   dim as long     wt_samp_valmax = 65536 * 3
   
   dim as long     wt_sine(), wt_tri(), wt_saw(), wt_square(), wt_noise()', wt_wave()
@@ -653,7 +625,6 @@ namespace my_wavetables
 
   function f_idx_tonal(t as single) as long
     return (wt_len_tone) * (t - int(t)) - 0.5 '' 2026 Nov 23
-    'return (wt_len_tone) * frac(t) - 0.5
   end function
 
 function wSine(t as single)  as long  : return wt_sine( f_idx_tonal(t) )   : end function
@@ -662,7 +633,6 @@ function wSaw(t as single)   as long  : return wt_saw( f_idx_tonal(t) )    : end
 function wSquare(t as single) as long : return wt_square( f_idx_tonal(t) ) : end function
 
 function wNoise(t as single) as long  : return wt_noise( int(t) mod virtual_len_noise ): end function
-'function wNoise(t as single) as long  : return wt_noise( modu(t, virtual_len_noise) ): end function
 
 sub fill_wavetables(u as long = -1)
     if u > -1 then wt_len_tone = u + 1
@@ -807,7 +777,6 @@ sub AddNoteToSignal(a() as LngLR, byref nvars as notevars)
   for I as long = 0 to ubound(a)
     SampleLogic( nvars, nvars.chanL, a(I).L )
     SampleLogic( nvars, nvars.chanR, a(I).R )
-    'nvars.mod_phase += 1.0 / rate
   next
 end sub
 
@@ -933,7 +902,6 @@ namespace scopes
     end if
 
     dim as long   idx  = f_idx_tonal(phase + fm)
-    'if idx < 0 or idx >= wt_len_tone then ? idx:sleep '' bug: idx was < 0
     dim as long   wave = f_wavemorph(morph, idx)
 
     if _wave_mode < 2 then return wave / wt_samp_valmax
@@ -1101,16 +1069,16 @@ with groups(1)
   .x = 40 : .y = y0 + (155 + gap_y)
   .hue = 0.10 : .hue_spread = 0.04
   .group_label = "FM Amp"
-  .suffixes = "Cen;Amp;LFO;Ratio"
+  .suffixes = "Cen;Amp;LFO"
   .render_type = 0
 end with
 index = 3 : size = 130
 init_knobs myk(), groups(1), index, size, gap_x, gap_y
 kinit  3,   0.5,   2.5
 kinit  4,   0.0,   2.5
-kinit  5,  40.0,   5000
+kinit  5,   4.0,   5000
 myk(6) = myk(5)
-kinit  6,  0.001, 2.5,  "FM Ratio", 0.001, groups(1).x + 3 * (size + gap_x), groups(1).y, 0.0 '' step
+kinit  6,  0.001, 2.5,  "FM Ratio", 0.000, groups(1).x + 3 * (size + gap_x), groups(1).y, 0.0 '' step
 
 set_LFO synth_patch.LFO_FMAmt,   myk(), index, -myk(6).hi '' DeepSeek suggestion
 
@@ -1159,7 +1127,7 @@ end sub
 
 dim as single velo = 0.7
 SetNote Base_Note_Index, velo
-'SetNote Base_Note_Index+4, velo
+SetNote Base_Note_Index+4, velo
 
 apply_knobs
 
